@@ -1,0 +1,293 @@
+import { Callout } from '@/components/Callout'
+
+# Getting Started with Keploy: Testing Go Applications Made Easy
+
+## Introduction
+
+Welcome! In this tutorial, you'll learn how to use **Keploy** to automatically generate tests for your Go applications. Keploy is an open-source API testing platform that captures network interactions and converts them into test cases and mocks—without you writing a single line of test code.
+
+We'll be working with a **URL Shortener application** built with **Gin** (a popular Go web framework) and **MongoDB**. By the end of this guide, you'll understand:
+
+- What Keploy is and why it's valuable for Go developers
+- How to set up Keploy for your application
+- How to record API interactions and generate tests automatically
+- How to run those tests with dependency mocking
+
+## What is Keploy?
+
+Keploy is an API testing and mocking platform designed to simplify the testing process for developers. Instead of manually writing tests, Keploy:
+
+1.  **Records** your application's API calls and database interactions
+2.  **Generates** test cases and mocks automatically
+3.  **Replays** tests with mocked dependencies for consistent, reliable results
+
+### Why Use Keploy?
+
+| Benefit | Description |
+| :--- | :--- |
+| **Zero Test Code** | No need to write boilerplate test code |
+| **Dependency Mocking** | Automatically mocks databases, external APIs, and services |
+| **Fast Feedback Loop** | Catch regressions immediately with automated test runs |
+| **Realistic Tests** | Tests are based on actual user interactions |
+
+## Prerequisites
+
+Before we begin, make sure you have the following installed:
+
+- **Go** (1.19 or later)
+- **Docker** and **Docker Compose**
+- **curl** or **Postman** (for making API calls)
+- **Keploy CLI** (we'll install this next)
+
+### Installing Keploy
+
+Keploy can be installed with a single command:
+
+```bash
+curl --silent -O -L https://keploy.io/install.sh && bash install.sh
+```
+
+This installs the Keploy CLI tool on your system. You can verify the installation by running `keploy --version`.
+
+## Step 1: Clone the Sample Application
+
+Let's start by cloning the official Keploy samples repository and navigating to the Gin + MongoDB project:
+
+```bash
+git clone https://github.com/keploy/samples-go.git
+cd samples-go/gin-mongo
+go mod download
+```
+
+This URL shortener application has two main endpoints:
+
+- `POST /url` - Creates a shortened URL
+- `GET /:shortUrl` - Redirects to the original URL
+
+The application uses MongoDB to store the URL mappings.
+
+## Step 2: Understanding the Setup
+
+The project includes a `docker-compose.yml` file that sets up:
+
+- **MongoDB** - The database for storing URL mappings
+- **Gin Application** - The Go web server
+
+Using Docker Compose ensures a consistent environment and makes it easy to clean up when you're done.
+
+## Step 3: Record Mode - Capturing API Interactions
+
+Now comes the exciting part! We'll use Keploy to record our API interactions.
+
+### Start Recording
+
+Run the following command to start Keploy in record mode:
+
+```bash
+keploy record -c "docker compose up" --container-name "ginMongoApp"
+```
+
+<Callout type="info" title="Key flags explained">
+- `-c`: The command to run your application (Docker Compose in this case)
+- `--container-name`: The name of your application container for traffic interception
+</Callout>
+
+You should see Keploy starting up with logs like:
+
+```bash
+🐰 Keploy: 2024-01-15T10:30:00.000Z INFO starting Keploy
+🐰 Keploy: 2024-01-15T10:30:00.000Z INFO starting proxy at port 16789
+🐰 Keploy: 2024-01-15T10:30:00.000Z INFO starting the application
+```
+
+## Step 4: Generate Test Cases with API Calls
+
+With Keploy recording, let's make some API calls to generate test cases. Open a new terminal and run:
+
+### Create a Shortened URL
+
+```bash
+curl --request POST \
+  --url http://localhost:8080/url \
+  --header 'content-type: application/json' \
+  --data '{
+    "url": "https://google.com"
+  }'
+```
+
+You should get a response like:
+
+```json
+{
+  "ts": 1645540022,
+  "url": "http://localhost:8080/Lhr4BWAi"
+}
+```
+
+### Test the Redirect
+
+Now let's test the redirect functionality:
+
+```bash
+curl --request GET --url http://localhost:8080/Lhr4BWAi
+```
+
+Or simply open `http://localhost:8080/Lhr4BWAi` in your browser!
+
+Each API call you make is being captured by Keploy and will be converted into a test case.
+
+## Step 5: Understanding the Generated Tests
+
+Stop the recording (Ctrl+C) and look at what Keploy created:
+
+```bash
+ls -la keploy/
+```
+
+You'll find:
+
+- `test-1.yml` - The HTTP test case for your API call
+- `mocks.yml` - The MongoDB mocks captured during the interaction
+
+### The Test File Structure
+
+`keploy/test-1.yml`
+
+```yaml
+version: api.keploy.io/v1beta2
+kind: Http
+name: test-1
+spec:
+  metadata: {}
+  req:
+    method: POST
+    proto_major: 1
+    proto_minor: 1
+    url: http://localhost:8080/url
+    header:
+      Accept: "*/*"
+      Content-Type: application/json
+      Host: localhost:8080
+    body: '{"url":"https://google.com"}'
+  resp:
+    status_code: 200
+    header:
+      Content-Type: application/json
+    body: '{"ts":1696173347979970488,"url":"http://localhost:8080/Lhr4BWAi"}'
+  assertions:
+    noise:
+      - header.Date
+```
+
+The `noise` field tells Keploy which fields to ignore during comparison (like timestamps that change each run).
+
+## Step 6: Test Mode - Running Your Tests
+
+Now let's run the tests with Keploy:
+
+```bash
+keploy test -c "docker compose up" --container-name "ginMongoApp" --delay 10
+```
+
+The `--delay 10` flag gives your application 10 seconds to start before running tests.
+
+### Understanding the Test Results
+
+Keploy will:
+
+1.  Start your application
+2.  Replay each recorded test case
+3.  Compare responses with the recorded ones
+4.  Report pass/fail status
+
+```bash
+🐰 Keploy: 2024-01-15T10:35:00.000Z INFO running test test-1
+🐰 Keploy: 2024-01-15T10:35:00.500Z INFO test passed: test-1
+🐰 Keploy: 2024-01-15T10:35:00.500Z INFO test run completed
+🐰 Keploy: 2024-01-15T10:35:00.500Z INFO passed: 1, failed: 0
+```
+
+All tests passed! Keploy successfully replayed your API call with mocked MongoDB responses.
+
+## Best Practices
+
+### 1. Organize Your Tests
+
+Keep your Keploy tests in version control:
+
+```bash
+git add keploy/
+git commit -m "Add Keploy tests for URL shortener"
+```
+
+### 2. CI/CD Integration
+
+Add Keploy to your CI pipeline:
+
+`.github/workflows/test.yml`
+
+```yaml
+name: Keploy Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run Keploy Tests
+        run: |
+          curl -O -L https://keploy.io/install.sh
+          bash install.sh
+          keploy test -c "docker compose up" --container-name "ginMongoApp"
+```
+
+### 3. Update Tests When APIs Change
+
+When your API changes, simply re-record:
+
+```bash
+# Clear old tests
+rm -rf keploy/
+
+# Record new tests
+keploy record -c "docker compose up" --container-name "ginMongoApp"
+```
+
+## Troubleshooting
+
+<Callout type="warning" title="Common Issues">
+**Issue: Tests Failing Due to Dynamic Data**
+If tests fail because of timestamps or random IDs, add those fields to the **noise** section in your test files.
+
+**Issue: Container Not Found**
+Make sure your `docker-compose.yml` has the correct `container_name`.
+
+**Issue: Port Conflicts**
+Ensure port 8080 is free: `lsof -ti:8080 | xargs kill -9`
+</Callout>
+
+## Wrapping Up
+
+Congratulations! You've successfully:
+
+- Set up Keploy for a Go application
+- Recorded API interactions automatically
+- Generated test cases and mocks
+- Ran tests with dependency mocking
+
+### Key Takeaways
+
+- Keploy eliminates the need to write boilerplate test code
+- Tests are generated from real user interactions
+- Mocks ensure consistent, reliable test runs
+- Integration with CI/CD is straightforward
+
+### Next Steps
+
+- Explore more Keploy features like test exporting
+- Try Keploy with other frameworks (Echo, Fiber, etc.)
+- Join the Keploy community on Slack
+
+<Callout type="info" title="Community">
+**Found this tutorial helpful?** Give Keploy a star on GitHub!
+</Callout>
